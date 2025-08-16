@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Мій список справ</title>
+  <style>
+    body { font-family: Arial, sans-serif; background-color: #f0f2f5; color: #333;
+      display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; margin: 0; padding: 20px; }
+    .container { background-color: #fff; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+      width: 100%; max-width: 500px; position: relative; }
+    h1 { text-align: center; margin-bottom: 20px; }
+    #showFormButton { width: 100%; padding: 12px; background-color: #28a745; color: white; border: none;
+      border-radius: 8px; cursor: pointer; font-size: 1.1em; font-weight: bold; margin-bottom: 20px; }
+    .task-form { display: none; flex-direction: column; gap: 15px; padding: 20px; border: 1px solid #eee;
+      border-radius: 8px; margin-bottom: 20px; background-color: #fdfdfd; }
+    .task-form.active { display: flex; }
+    .form-group label { font-size: 0.9em; margin-bottom: 5px; }
+    #taskInput,#taskDate,#taskTime { padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 1em; width: 100%; }
+    .form-actions { display: flex; gap: 10px; justify-content: flex-end; }
+    .form-actions button { padding: 10px 18px; border-radius: 8px; cursor: pointer; font-size: 1em; font-weight: bold; }
+    #saveTaskButton { background-color: #000; color: white; border: none; }
+    #cancelButton { background-color: #fff; border: 1px solid #ccc; }
+    #taskList { list-style: none; padding: 0; margin: 0; }
+    .task-item { padding: 12px 15px; border-bottom: 1px solid #eee; cursor: pointer; }
+    .task-top-row { display: flex; justify-content: space-between; margin-bottom: 5px; }
+    .task-text { font-weight: bold; }
+    .task-countdown { font-size: 0.85em; font-weight: bold; min-width: 80px; text-align: right; }
+    .task-countdown.overdue { color: #dc3545; }
+    .notification-bell { position: absolute; top: 15px; right: 20px; font-size: 24px; cursor: pointer; }
+    .notification-badge { position: absolute; top: -5px; right: -10px; background-color: red; color: white;
+      border-radius: 50%; padding: 2px 6px; font-size: 0.7em; display: none; }
+    .notification-badge.active { display: inline; }
+    #notificationListContainer { position: fixed; top: 60px; right: 20px; background: #fff; border: 1px solid #ccc;
+      border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); width: 300px; max-height: 70vh;
+      overflow-y: auto; display: none; padding: 10px; }
+    #notificationListContainer.active { display: block; }
+    .notification-item { padding: 5px 0; border-bottom: 1px solid #eee; }
+    .notification-item:last-child { border-bottom: none; }
+    #alarmNotification { position: fixed; top: 0; left: 0; width: 100%; background-color: #f8d7da; color: #721c24;
+      padding: 15px; text-align: center; font-size: 1.1em; font-weight: bold; z-index: 1000;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2); display: none; }
+    #closeAlarm { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; font-size: 1.5em; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="notification-bell" id="notificationBell">
+      ✉
+      <span class="notification-badge" id="notificationBadge"></span>
+    </div>
+    <h1>Список справ</h1>
+    <button id="showFormButton">Додати завдання</button>
+    <div class="task-form" id="taskForm"> 
+      <div class="form-group">
+        <label for="taskInput">Завдання:</label>
+        <input type="text" id="taskInput">
+      </div>
+      <div class="form-group">
+        <label for="taskDate">Дата:</label>
+        <input type="date" id="taskDate">
+      </div>
+      <div class="form-group">
+        <label for="taskTime">Час:</label>
+        <input type="time" id="taskTime">
+      </div>
+      <div class="form-actions">
+        <button id="cancelButton">Скасувати</button>
+        <button id="saveTaskButton">Зберегти</button>
+      </div>
+    </div>
+    <ul id="taskList"></ul>
+  </div>
+
+  <div id="notificationListContainer">
+    <ul id="notificationList"></ul>
+  </div>
+
+  <div id="alarmNotification">
+    <span id="alarmMessage"></span>
+    <button id="closeAlarm">&times;</button>
+  </div>
+
+  <script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const showFormButton = document.getElementById('showFormButton');
+    const taskForm = document.getElementById('taskForm'); 
+    const taskInput = document.getElementById('taskInput');
+    const taskDate = document.getElementById('taskDate');
+    const taskTime = document.getElementById('taskTime');
+    const saveTaskButton = document.getElementById('saveTaskButton');
+    const cancelButton = document.getElementById('cancelButton');
+    const taskList = document.getElementById('taskList');
+
+    const alarmNotification = document.getElementById('alarmNotification');
+    const alarmMessage = document.getElementById('alarmMessage');
+    const closeAlarmButton = document.getElementById('closeAlarm');
+
+    const notificationBell = document.getElementById('notificationBell');
+    const notificationBadge = document.getElementById('notificationBadge');
+    const notificationListContainer = document.getElementById('notificationListContainer');
+    const notificationList = document.getElementById('notificationList');
+
+    const countdownIntervals = new Map();
+    let notifications = [];
+    let editingTaskItem = null;
+
+    function showForm(isEditing = false) {
+      taskForm.classList.add('active'); 
+      showFormButton.style.display = 'none'; 
+      saveTaskButton.textContent = isEditing ? 'Оновити' : 'Зберегти';
+      taskInput.focus();
+    }
+    function hideForm() {
+      taskForm.classList.remove('active'); 
+      showFormButton.style.display = 'block'; 
+      taskInput.value = ''; taskDate.value = ''; taskTime.value = '';
+      saveTaskButton.textContent = 'Зберегти';
+      editingTaskItem = null;
+    }
+    function saveTaskFromForm() {
+      const taskText = taskInput.value.trim();
+      const dateValue = taskDate.value;
+      const timeValue = taskTime.value;
+      if (taskText === '') { alert('Введіть текст завдання!'); return; }
+
+      if (editingTaskItem) {
+        editingTaskItem.querySelector('.task-text').textContent = taskText;
+        editingTaskItem.dataset.date = dateValue;
+        editingTaskItem.dataset.time = timeValue;
+        editingTaskItem.querySelector('.task-deadline').textContent = `${dateValue || ''} ${timeValue || ''}`;
+        editingTaskItem.dataset.alertedOverdue = 'false';
+        updateCountdown(editingTaskItem);
+      } else {
+        addTaskToDOM(taskText, dateValue, timeValue);
+      }
+      hideForm();
+    }
+    function addTaskToDOM(taskText, taskDateStr, taskTimeStr) {
+      const li = document.createElement('li');
+      li.classList.add('task-item');
+      li.dataset.date = taskDateStr;
+      li.dataset.time = taskTimeStr;
+      li.dataset.taskText = taskText; 
+      li.dataset.alertedOverdue = 'false';
+      li.innerHTML = `
+        <div class="task-top-row">
+          <span class="task-text">${taskText}</span>
+          <span class="task-countdown"></span> 
+        </div>
+        <div class="task-deadline">${taskDateStr || ''} ${taskTimeStr || ''}</div>
+      `;
+      li.querySelector('.task-text').addEventListener('click', () => {
+        editingTaskItem = li;
+        taskInput.value = taskText;
+        taskDate.value = taskDateStr;
+        taskTime.value = taskTimeStr;
+        showForm(true);
+      });
+      taskList.appendChild(li);
+      updateCountdown(li); 
+    }
+    function updateCountdown(taskItem) {
+      const dateStr = taskItem.dataset.date;
+      const timeStr = taskItem.dataset.time;
+      const taskText = taskItem.dataset.taskText;
+      const countdownElement = taskItem.querySelector('.task-countdown');
+
+      if (!dateStr && !timeStr) { 
+        countdownElement.textContent = ''; 
+        return; 
+      }
+
+      if (countdownIntervals.has(taskItem)) {
+        clearInterval(countdownIntervals.get(taskItem));
+      }
+
+      const deadlineDateTime = new Date(`${dateStr}T${timeStr || '23:59:59'}`);
+
+      const tick = () => {
+        const now = new Date();
+        const diff = deadlineDateTime.getTime() - now.getTime();
+
+        if (diff <= 0) {
+          countdownElement.textContent = 'Прострочено';
+          countdownElement.classList.add('overdue');
+
+          clearInterval(countdownIntervals.get(taskItem));
+          countdownIntervals.delete(taskItem);
+
+          if (taskItem.dataset.alertedOverdue !== 'true') {
+            addNotification(`Час на виконання завдання "${taskText}" минув!`);
+            showAlarm(`Час на виконання завдання "${taskText}" минув!`);
+            taskItem.dataset.alertedOverdue = 'true'; 
+          }
+          return;
+        }
+
+        const totalSeconds = Math.floor(diff / 1000);
+        const days = Math.floor(totalSeconds / 86400);
+        const hours = Math.floor((totalSeconds % 86400) / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+
+        let text = '';
+        if (days > 0) text += days+' д. ';
+        if (hours > 0) text += hours+' год. ';
+        if (minutes > 0) text += minutes+' хв. ';
+        if (seconds > 0 && days === 0 && hours === 0 && minutes === 0) text += seconds+' сек.';
+        countdownElement.textContent = text.trim();
+      };
+
+      tick(); 
+      const intervalId = setInterval(tick, 1000);
+      countdownIntervals.set(taskItem, intervalId);
+    }
+
+    function addNotification(message) {
+      const notif = {id: Date.now(), message, read:false};
+      notifications.unshift(notif);
+      renderNotifications();
+      updateNotificationBadge();
+    }
+    function renderNotifications() {
+      notificationList.innerHTML='';
+      if (notifications.length===0){ notificationList.innerHTML='<li>Немає сповіщень</li>'; return; }
+      notifications.forEach(n=>{
+        const li=document.createElement('li');
+        li.classList.add('notification-item');
+        if (!n.read) li.style.fontWeight='bold';
+        li.textContent=n.message;
+        notificationList.appendChild(li);
+      });
+    }
+    function updateNotificationBadge() {
+      const unread=notifications.filter(n=>!n.read).length;
+      if (unread>0){ notificationBadge.textContent=unread; notificationBadge.classList.add('active'); }
+      else notificationBadge.classList.remove('active');
+    }
+    function markAllNotificationsAsRead() {
+      notifications.forEach(n=>n.read=true);
+      renderNotifications(); updateNotificationBadge();
+    }
+    function showAlarm(message) {
+      alarmMessage.textContent = message;
+      alarmNotification.style.display = 'block';
+      setTimeout(() => { alarmNotification.style.display = 'none'; }, 10000);
+    }
+
+    showFormButton.addEventListener('click', ()=>showForm(false));
+    saveTaskButton.addEventListener('click', saveTaskFromForm);
+    cancelButton.addEventListener('click', hideForm);
+    closeAlarmButton.addEventListener('click', ()=>{ alarmNotification.style.display='none'; });
+    notificationBell.addEventListener('click', (e)=>{ e.stopPropagation(); notificationListContainer.classList.toggle('active'); if(notificationListContainer.classList.contains('active')) markAllNotificationsAsRead(); });
+    document.addEventListener('click', (e)=>{ if(!notificationListContainer.contains(e.target)&&!notificationBell.contains(e.target)){ notificationListContainer.classList.remove('active'); }});
+  });
+  </script>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script>
+        window.Telegram.WebApp.ready();
+        window.Telegram.WebApp.MainButton.setText("Додати завдання");
+        window.Telegram.WebApp.MainButton.show();
+        window.Telegram.WebApp.onEvent('mainButtonClicked', () => {
+        document.getElementById('showFormButton').click();
+        });
+    </script>
+</body>
+</html>
